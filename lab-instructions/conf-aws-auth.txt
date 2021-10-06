@@ -1,0 +1,71 @@
+### REQUISITOS: AWS CLI y KUBECTL
+CONFIGURACION DEL USUARIO:
+	// Crear nuevo usuario con acceso restringido
+	aws iam create-user --user-name developer1
+	// Crear política para acceder a ver nodos y cargas de trabajo en EKS
+	aws iam create-policy --policy-name TempDevOriginalPolicy --policy-document file://developer-original-permissions.json
+	// Asociar la política al usuario developer
+	aws iam attach-user-policy --user-name developer1 --policy-arn "arn:aws:iam::971144273182:policy/TempDevOriginalPolicy"
+	// Crear política que usará el rol que asumirán los developers para acceder a EKS
+	aws iam create-policy --policy-name TempEksViewPolicy --policy-document file://view-eks-nodes-workloads.json
+	// Crear un rol que será asumido por los developers para poder acceder a EKS
+	aws iam create-role --role-name eksDevsToAssumeRole --assume-role-policy-document file://"developers-trust-policy.json"
+	// Asociar al nuevo rol la política creada
+	aws iam attach-role-policy --role-name eksDevsToAssumeRole --policy-arn "arn:aws:iam::971144273182:policy/TempEksViewPolicy"
+VALIDACION 1: Con AWS CLI
+	// Crear access keys para el usuario developer1 (Access Key: AKIA6EHFVTUPJYG47364	Secret Access Key: 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)
+	aws iam create-access-key --user-name developer1
+	// Crear perfil AWS CLI para developer1 y hacer el switch a perfil de dicho usuario
+	aws configure --profile developer1
+	export AWS_PROFILE=developer1
+	// Validar perfil de usuario actual
+	aws sts get-caller-identity
+	// Validar si puede consultar la lista de instancias EC2 (Si va a poder)
+	aws ec2 describe-instances --query "Reservations[*].Instances[*].[VpcId, InstanceId, ImageId, InstanceType]"
+	// Validar si puede listar los clusters EKS (No va a poder)
+	aws eks list-clusters
+	// Configuro ~/.aws/config para incluir un profile para el nuevo rol
+	...
+	// Validar si puede listar los clusters EKS con el nuevo perfil (Si va a poder)
+	aws eks list-clusters --profile eksdevelopers
+	// Switch al perfil de administrador
+	export AWS_PROFILE=default
+VALIDACION 2: Con Consola Web
+	// Brindo contraseña de consola al usuario developer1
+	...
+	// Login a la Consola Web de AWS
+	...
+	// Valido acceso a los permisos asociados directamente al usuario
+	- Puedo ver instancias
+	- No puedo ver información del EKS
+	// Realizo el switch de roles
+	- Si puedo ver información del EKS
+VALIDACION 3: Con AWS CLI + KUBECTL
+	// Descargo configuración de Kubernetes RBAC para grupo de usuarios con solo acceso de lectura a namespace default
+	wget https://amazon-eks.s3.us-west-2.amazonaws.com/docs/eks-console-restricted-access.yaml
+	// Edito el ConfigMap aws-auth y agrego un elemento al mapa de roles
+	kubectl edit -n kube-system configmap/aws-auth
+	    - rolearn: arn:aws:iam::971144273182:role/eksDevsToAssumeRole
+		  username: developers
+		  groups:
+          - eks-console-dashboard-restricted-access-group
+	// Switch de perfil a usuario developer1
+	export AWS_PROFILE=developer1
+	// Valido consultar los pods del cluster en namespace default (No va a poder)
+	kubectl get pods
+	// developer1 asume el nuevo rol y obtiene credenciales temporales
+	aws sts assume-role --role-arn "arn:aws:iam::971144273182:role/eksDevsToAssumeRole" --role-session-name AWSCLI-Session
+	// Asignar las credenciales temporales a variables de entorno
+	export AWS_ACCESS_KEY_ID=<<valor>>
+	export AWS_SECRET_ACCESS_KEY=<<valor>>
+	export AWS_SESSION_TOKEN=<<valor>>
+	// Validar listar instancias (No va a poder)
+	aws ec2 describe-instances --query "Reservations[*].Instances[*].[VpcId, InstanceId, ImageId, InstanceType]"
+	// Validar listar los clusters EKS (Si va a poder)
+	aws eks list-clusters
+	// Valido consultar los pods del cluster en namespace default (Si va a poder)
+	kubectl get pods
+	// Valido consultar los pods del cluster en namespace kube-system (No va a poder)
+	kubectl get pods -n kube-system
+	// Eliminar las variables de entorno temporales
+	unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN

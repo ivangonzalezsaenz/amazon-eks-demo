@@ -1,0 +1,39 @@
+// crear VPC + recursos adicionales
+aws cloudformation create-stack --region us-west-2 --stack-name eks-webconsole-stack --template-url https://amazon-eks.s3.us-west-2.amazonaws.com/cloudformation/2020-10-29/amazon-eks-vpc-private-subnets.yaml
+
+// crear Cluster Role
+// Crear ROL + POLITICA DE CONFIANZA
+aws iam create-role --role-name myAmazonEKSClusterRole --assume-role-policy-document file://"cluster-role-trust-policy.json"
+// Asociar POLITICA DE PERMISOS
+aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy --role-name myAmazonEKSClusterRole
+
+// crear por Consola WEB el Cluster
+- Ir a consola del EKS
+- Ir a consola de EC2 para ver las ENIs creadas
+
+// Configurar acceso al API Server desde entorno local
+aws eks update-kubeconfig --region us-west-2 --name eks-webconsole
+
+// Crear el IAM Identity Provider
+- Copiar el URL del endpoint de discovery OpenID Connect de EKS
+- Ir a consola de IAM:
+	- Tipo de proveedor: OpenID Connect
+	- Provider URL: Pegar el URL del endpoint de discovery OpenID Connect de EKS
+	- Audiencia: sts.amazonaws.com	(que es el Security Token Service de AWS)
+
+// crear CNI Role
+aws iam create-role --role-name myAmazonEKSCNIRole --assume-role-policy-document file://"cni-role-trust-policy.json" // Editar antes el ID del EKS OIDC Issuer URL
+aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy --role-name myAmazonEKSCNIRole
+
+// Asociar el nuevo rol al CNI Plugin
+aws eks update-addon --region us-west-2 --cluster-name eks-webconsole --addon-name vpc-cni --service-account-role-arn arn:aws:iam::971144273182:role/myAmazonEKSCNIRole 
+
+// Crear nuevo rol para los worker nodes
+aws iam create-role --role-name myAmazonEKSNodeRole --assume-role-policy-document file://"node-role-trust-policy.json"
+aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy --role-name myAmazonEKSNodeRole
+aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly --role-name myAmazonEKSNodeRole
+
+// Crear un managed node group
+- Asociar Node Role creado anteriormente
+- Seleccionar tipo de instancia EC2 t2.small, 10Gb
+- Seleccionar solamente las subnets privadas para los nodos
